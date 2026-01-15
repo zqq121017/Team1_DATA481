@@ -1,0 +1,55 @@
+```{r}
+# Get the Data
+
+# Read in with tidytuesdayR package 
+library("tidytuesdayR")
+# This loads the readme and all the datasets for the week of interest
+
+# Either ISO-8601 date or year/week works!
+
+tuesdata <- tidytuesdayR::tt_load('2021-03-02')
+tuesdata <- tidytuesdayR::tt_load(2021, week = 10)
+
+youtube <- tuesdata$youtube
+
+# Or read in the data manually
+
+youtube <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2021/2021-03-02/youtube.csv')
+```
+```{r}
+library(tidyverse); library(janitor); library(scales)
+
+url <- "https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-03-02/youtube.csv"
+traits <- c("funny","show_product_quickly","patriotic","celebrity","danger","animals","use_sex")
+to_bool <- function(x) as.numeric(tolower(as.character(x)) %in% c("true","t","1","yes","y"))
+
+df <- read_csv(url, show_col_types=FALSE) %>% clean_names() %>%
+  mutate(year=as.integer(year), view_count=as.numeric(view_count)) %>%
+  filter(!is.na(year), view_count>0) %>%
+  {for(t in traits) .[[t]] <- to_bool(.[[t]]); .} %>%
+  pivot_longer(all_of(traits), names_to="trait", values_to="val")
+
+# % of ads with trait by year
+df %>%
+  group_by(year, trait) %>%
+  summarise(pct=mean(val==1, na.rm=TRUE), .groups="drop") %>%
+  ggplot(aes(year, pct, color=trait)) +
+  geom_line() + geom_point() +
+  scale_y_continuous(labels=percent) +
+  labs(title="Trait prevalence over time", y="% of ads", x="Year") +
+  theme_minimal()
+
+# mean log(views) when trait present
+df %>%
+  filter(val==1) %>%
+  group_by(year, trait) %>%
+  summarise(m=mean(log1p(view_count)), .groups="drop") %>%
+  ggplot(aes(year, m)) +
+  geom_line() + geom_point() +
+  facet_wrap(~trait, scales="free_y") +
+  labs(title="Mean log(views) over time (trait present)", y="Mean log1p(views)", x="Year") +
+  theme_minimal()
+```
+
+
+This code visualizes the time trends of commercial traits over time and shows the amount of views they get over time (scaled)
