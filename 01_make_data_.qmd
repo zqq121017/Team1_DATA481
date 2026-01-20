@@ -1,0 +1,88 @@
+---
+title: "Data 481 Superbowl"
+format: html
+editor: visual
+---
+
+## Quarto
+
+# Superbowl Visualization
+
+Section 1:
+
+My goal was to determine if a linear model can be used to evaluate the relationship between ad characteristics/categories ("funny" or "patriotic") and ad metrics, such as view counts.
+
+Section 2:
+
+My hope is to find that the 4 assumptions of linear regression would be met, meaning that it is possible to evaluate this relationship with a linear model.
+
+Section 3:
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+
+# load data
+library(readr)
+library(tidyverse)
+youtube <- read_csv("/Users/mizz/Downloads/youtube.csv")
+raw_data <- read_csv("https://raw.githubusercontent.com/fivethirtyeight/superbowl-ads/main/superbowl-ads.csv")
+
+```
+
+Section 4:
+
+```{r}
+#| label: retrieve-and-verify
+library(tidyverse)
+
+# verify dimensions and variables
+dim(raw_data)
+dim(youtube)
+colnames(raw_data)
+colnames(youtube)
+```
+
+Section 5:
+
+```{r}
+
+# merge datasets
+final_data <- left_join(raw_data, youtube)
+
+# create the RData folder
+if (!dir.exists("RData")) { dir.create("RData") }
+# save data in RData folder
+save(final_data, file = "RData/superbowl_combined.RData")
+write_csv(final_data, "RData/superbowl_combined.csv")
+# confirm the file exists
+file.exists("RData/superbowl_combined.RData")
+
+```
+
+Section 6:
+
+For the assumption of linearity, I see that the red line in the first plot is relatively flat. This confirms that the relationship between the year/category and the view count is linear, meeting the first condition.
+
+For the assumption of normality, while most of the data points follow the line, at the tails there are outliers, specifically on the right tail data observation 229 shows a significant deviation.
+
+For the assumption of homoscedasticity, I see that the spread of points is fairly consistent across the plot. This indicates that the variance of our residuals is mostly constant, though it widens slightly for the more popular videos. Additionally, after doing an Breusch-Pagan test I can see that with a p value \> 0.05, I can fail to reject the null hypothesis, meaning the third
+
+Lastly, for the assumption of outliers, there are outliers such as observation 229, but looking at the residuals vs leverage graph there is no much leverage as it has a fairly low cooks distance.
+
+My conclusion, is that the diagnostic evaluation confirms that the key assumptions for linear regression are largely satisfied and can be evaluated with a linear model.
+
+```{r}
+library(lmtest)
+# create the model using your joined data
+model <- lm(view_count ~ year, data = final_data)
+
+# generate 4 diagnostic plots
+par(mfrow = c(1, 1))
+plot(model, which = 1) # Linearity
+plot(model, which = 2) # Normality (Q-Q Plot)
+plot(model, which = 3) # Homoscedasticity
+plot(model, which = 5) # Outliers/Leverage
+bptest(model)
+```
