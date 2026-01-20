@@ -86,3 +86,47 @@ plot(model, which = 3) # Homoscedasticity
 plot(model, which = 5) # Outliers/Leverage
 bptest(model)
 ```
+
+```{r}
+library(lmtest)
+
+log_model <- lm(log(view_count + 1) ~ year, data = final_data)
+
+plot(log_model, which = 1) # Linearity (should look flatter)
+plot(log_model, which = 2) # Normality (Q-Q Plot should be straighter)
+plot(log_model, which = 3) # Homoscedasticity (Scale-Location)
+plot(log_model, which = 5) # Outliers/Leverage
+bptest(log_model)
+
+dwtest(log_model)
+```
+
+```{r}
+library(sandwich)
+library(lmtest)
+
+# This gives you "Robust" results that aren't as affected by heteroscedasticity
+coeftest(log_model, vcov = vcovHC(log_model, type = "HC3"))
+```
+
+```{r}
+library(lmtest)
+library(sandwich)
+
+# 1. Create the squared model
+# I() is used to tell R to treat the math inside literally
+squared_model <- lm(I(view_count^2) ~ year, data = final_data)
+
+# 2. Generate the 4 diagnostic plots to compare
+par(mfrow = c(2, 2))
+plot(squared_model, which = 1) # Linearity
+plot(squared_model, which = 2) # Normality (Q-Q Plot)
+plot(squared_model, which = 3) # Homoscedasticity
+plot(squared_model, which = 5) # Outliers/Leverage
+
+# 3. Run the Breusch-Pagan test
+bptest(squared_model)
+
+# 4. Check the robust coefficients
+coeftest(squared_model, vcov = vcovHC(squared_model, type = "HC3"))
+```
