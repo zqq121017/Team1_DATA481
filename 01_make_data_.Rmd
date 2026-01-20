@@ -62,4 +62,4 @@ df %>%
   theme_minimal()
 
 ```
-This visualizes the time trends of commercial traits over time and shows the amount of views they get over time (log scaled)
+This visualizes the time trends of commercial traits and shows the amount of views they get over time (log scaled)
