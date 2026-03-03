@@ -7,7 +7,17 @@ from sklearn.preprocessing import StandardScaler
 import torch
 import torch.nn as nn
 from sklearn.model_selection import KFold
+import os
+import csv
+import datetime
 
+split_folds = 5
+log_filename = f"training_logs/{split_folds}_kfold_training_log_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+with open(log_filename, mode='w', newline='') as f:
+    writer = csv.writer(f)
+    writer.writerow(['Epoch', 'Train_MSE', 'Val_MSE', 'Fold'])
+
+print(f"Logging results to: {log_filename}")
 
 base_path = "../../data"
 merge_keys = ['teamID', 'sessionID', 'trialID', 'ringID']
@@ -64,7 +74,7 @@ pup_raw = process_branch(df_main, ['yawPupil', 'pitchPupil', 'thrustPupil'], 90)
 spc_raw = process_branch(df_main, ['yawSpeech', 'pitchSpeech', 'thrustSpeech'], 90)
 y_labels = df_main['target_score'].values.astype(np.float32)
 
-# Normalize Physiological signals as done in the paper [cite: 694, 696]
+# Normalize Physiological signals as done in the paper
 def normalize_3d(data):
     s, c, t = data.shape
     scaler = StandardScaler()
@@ -137,7 +147,6 @@ elif torch.backends.mps.is_available():
     device = "mps" # Use Apple Silicon GPU (if available)
 else:
     device = "cpu" # Default to CPU if no GPU is available
-model = FullADCTModel().to(device)
 # 1. Setup Data and Device
 full_dataset = TensorDataset(
     torch.tensor(eeg_norm, dtype=torch.float32), 
@@ -148,7 +157,7 @@ full_dataset = TensorDataset(
 )
 
 # 2. Initialize Cross-Validation
-kf = KFold(n_splits=5, shuffle=True, random_state=42)
+kf = KFold(n_splits=split_folds, shuffle=True, random_state=42)
 fold_results = []
 
 print(f"Starting 5-Fold Cross-Validation on {device}...")
@@ -169,37 +178,47 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(np.arange(len(full_dataset)
     criterion = nn.MSELoss()
     
     # --- Training Phase (Example for 10 epochs per fold) ---
-    for epoch in range(10):
+    for epoch in range(30):
+        # --- TRAINING PHASE ---
         model.train()
+        total_train_loss = 0
         for b_eeg, b_act, b_pup, b_spc, b_y in train_loader:
             inputs = [x.to(device) for x in [b_eeg, b_act, b_pup, b_spc]]
-            target = b_y.to(device).view(-1, 1) # Fix target size warning
+            target = b_y.to(device).view(-1, 1)
             
             optimizer.zero_grad()
             output = model(*inputs)
             loss = criterion(output, target)
             loss.backward()
             optimizer.step()
+            total_train_loss += loss.item()
             
-    # --- Validation Phase ---
-    model.eval()
-    val_errors = []
-    with torch.no_grad():
-        for b_eeg, b_act, b_pup, b_spc, b_y in val_loader:
-            inputs = [x.to(device) for x in [b_eeg, b_act, b_pup, b_spc]]
-            target = b_y.to(device).view(-1, 1)
+        avg_train_loss = total_train_loss / len(train_loader)
+
+        # --- VALIDATION PHASE ---
+        model.eval()
+        total_val_loss = 0
+        with torch.no_grad():
+            for b_eeg, b_act, b_pup, b_spc, b_y in val_loader:
+                inputs = [x.to(device) for x in [b_eeg, b_act, b_pup, b_spc]]
+                target = b_y.to(device).view(-1, 1)
+                total_val_loss += criterion(model(*inputs), target).item()
+        
+        avg_val_loss = total_val_loss / len(val_loader)
+        
+        # --- SAVE EACH EPOCH OUTPUT TO FILE ---
+        with open(log_filename, mode='a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([epoch + 1, f"{avg_train_loss:.4f}", f"{avg_val_loss:.4f}", fold + 1])
             
-            output = model(*inputs)
-            val_errors.append(criterion(output, target).item())
-            
-    avg_val_loss = np.mean(val_errors)
-    fold_results.append(avg_val_loss)
-    print(f"Fold {fold + 1} Validation MSE: {avg_val_loss:.4f}")
+        print(f"Epoch {epoch+1:02d} | Train: {avg_train_loss:.4f} | Val: {avg_val_loss:.4f}")
     
-    # CRITICAL: Clean up memory before starting next fold
+    fold_results.append(avg_val_loss)
+    
+    # --- MEMORY CLEANUP (Cluster Safe) ---
     del model, optimizer, train_loader, val_loader
     gc.collect()
-    torch.mps.empty_cache() # Clear Mac GPU memory
+    # Removed torch.mps.empty_cache() to prevent Longleaf/CPU cras
 
 # 3. Final Evaluation
 print(f"\n--- Cross-Validation Complete ---")
