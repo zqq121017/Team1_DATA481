@@ -3,7 +3,7 @@
 #SBATCH --output=logs/cnn_grid_%j.log
 #SBATCH --error=errors/cnn_grid_error_%j.err
 #SBATCH --mem=48g               # Increased RAM for grid search overhead
-#SBATCH --cpus-per-task=32      # More cores for MKL speedup
+#SBATCH --cpus-per-task=64      # More cores for MKL speedup
 #SBATCH --time=24:00:00         # Grid search takes a long time on CPU
 #SBATCH --qos=normal
 

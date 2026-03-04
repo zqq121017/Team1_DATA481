@@ -14,8 +14,8 @@ from itertools import product
 
 # --- 1. SETTINGS & DEVICE ---
 # Optimization for Longleaf CPU
-os.environ["OMP_NUM_THREADS"] = "32"
-torch.set_num_threads(32)
+os.environ["OMP_NUM_THREADS"] = "64"
+torch.set_num_threads(64)
 device = torch.device("cpu")
 
 base_path = "../../data"
@@ -112,11 +112,12 @@ class DynamicADCTModel(nn.Module):
 # --- 4. GRID SEARCH EXECUTION ---
 # Search Space
 param_grid = {
-    'depth': [3, 4, 5, 6],
-    'filters': [16, 32],
-    'batch_size': [32],
-    'lr': [0.0005]
+    'depth': [1, 2, 3, 4, 5, 6],
+    'filters': [16, 32, 64],
+    'batch_size': [32, 64],
+    'lr': [0.0005, 0.001]
 }
+epoch_num = 50
 
 log_file = f"training_logs/grid_search_{datetime.datetime.now().strftime('%H%M%S')}.csv"
 with open(log_file, 'w') as f:
@@ -142,7 +143,7 @@ for config_vals in product(*values):
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
     criterion = nn.MSELoss()
 
-    for epoch in range(30):
+    for epoch in range(epoch_num):
         model.train()
         train_loss = 0
         for b_eeg, b_act, b_pup, b_spc, b_y in train_loader:
@@ -159,7 +160,7 @@ for config_vals in product(*values):
             for b_eeg, b_act, b_pup, b_spc, b_y in test_loader:
                 test_loss += criterion(model(b_eeg, b_act, b_pup, b_spc).squeeze(), b_y).item()
         
-        # Modality Importance (Ablation)
+        # Modality Importance (Ablation)    
         importances = []
         with torch.no_grad():
             t_eeg, t_act, t_pup, t_spc, t_y = [torch.stack([x[i] for x in test_ds]) for i in range(5)]
