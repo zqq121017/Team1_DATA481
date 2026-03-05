@@ -17,22 +17,16 @@ import datetime
 # Model architecture graph generator (place generate_model_graph.py alongside this file)
 from generate_model_graph import generate_model_graph
 
-# ═══════════════════════════════════════════════════════════════════
-#  ✏️  USER-EDITABLE HYPERPARAMETERS  — only change values here
-# ═══════════════════════════════════════════════════════════════════
 _USER = {
     "depth":        3,        # number of Conv layers per branch
     "filters":      64,       # convolutional filters per layer
     "kernel_size":  3,        # conv kernel size (int, same for all branches)
     "padding":      1,        # conv padding   (int, same for all branches)
     "learning_rate":0.0005,   # Adam LR
-    # ── difficulty label → target score mapping ──
     "diff_map": {"Easy": 1, "Medium": 2, "Hard": 3},
 }
 
-# ═══════════════════════════════════════════════════════════════════
-#  🔒  FIXED ARCHITECTURE CONSTANTS  (do not edit)
-# ═══════════════════════════════════════════════════════════════════
+
 _FIXED = {
     "model_name":        "FullADCTModel",
     "dropout":           0.4,
@@ -40,7 +34,7 @@ _FIXED = {
     "optimizer":         "Adam",
     "loss_fn":           "MSELoss",
     "batch_size":        32,
-    "epochs":            30,
+    "epochs":            40,
     "kfold_splits":      5,
     "kfold_shuffle":     True,
     "kfold_random_state":42,
@@ -52,9 +46,7 @@ _FIXED = {
     "bio_timesteps":     90,
 }
 
-# ═══════════════════════════════════════════════════════════════════
-#  🤖  AUTO-COMPUTED DERIVED SIZES  (driven entirely by _USER)
-# ═══════════════════════════════════════════════════════════════════
+
 def _conv_out(size, k, p, s=1):
     return math.floor((size + 2 * p - k) / s + 1)
 
@@ -93,9 +85,7 @@ HPARAMS = {
     "fusion_input":_fusion,
 }
 
-# ═══════════════════════════════════════════════════════════════════
-#  Logging setup
-# ═══════════════════════════════════════════════════════════════════
+
 split_folds = HPARAMS["kfold_splits"]
 os.makedirs("training_logs", exist_ok=True)
 log_filename = (
@@ -183,9 +173,7 @@ def _write_csv_header(path, hparams):
 _write_csv_header(log_filename, HPARAMS)
 print(f"Logging results to: {log_filename}")
 
-# ═══════════════════════════════════════════════════════════════════
-#  Data Loading
-# ═══════════════════════════════════════════════════════════════════
+
 base_path  = "../../data"
 merge_keys = ['teamID', 'sessionID', 'trialID', 'ringID']
 
@@ -245,9 +233,7 @@ del df_main, eeg_raw, pup_raw
 gc.collect()
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  Model  — fully driven by HPARAMS
-# ═══════════════════════════════════════════════════════════════════
+
 class FullADCTModel(nn.Module):
     def __init__(self, hparams):
         super().__init__()
@@ -299,9 +285,7 @@ class FullADCTModel(nn.Module):
         return self.fc(torch.cat((b1, b2, b3, b4), dim=1))
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  Helpers
-# ═══════════════════════════════════════════════════════════════════
+
 def count_params(model):
     total     = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -397,9 +381,7 @@ def print_model_details(model, hparams):
     return total, trainable
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  Device
-# ═══════════════════════════════════════════════════════════════════
+
 if torch.cuda.is_available():
     device = "cuda"
 elif torch.backends.mps.is_available():
@@ -407,9 +389,7 @@ elif torch.backends.mps.is_available():
 else:
     device = "cpu"
 
-# ═══════════════════════════════════════════════════════════════════
-#  Dataset
-# ═══════════════════════════════════════════════════════════════════
+
 full_dataset = TensorDataset(
     torch.tensor(eeg_norm,  dtype=torch.float32),
     torch.tensor(act_raw,   dtype=torch.float32),
@@ -427,9 +407,7 @@ print(f"\nStarting {split_folds}-Fold Cross-Validation on {device}...")
 # Generate architecture graph (uses HPARAMS → reflects current depth/filters/etc.)
 generate_model_graph(out_dir="training_logs", hparams=HPARAMS)
 
-# ═══════════════════════════════════════════════════════════════════
-#  Per-fold metric collectors
-# ═══════════════════════════════════════════════════════════════════
+
 train_mse_list  = []
 train_rmse_list = []
 train_mae_list  = []
@@ -442,9 +420,7 @@ val_r2_list     = []
 
 total_params = trainable_params = 0
 
-# ═══════════════════════════════════════════════════════════════════
-#  Training loop
-# ═══════════════════════════════════════════════════════════════════
+
 for fold, (train_idx, val_idx) in enumerate(kf.split(np.arange(len(full_dataset)))):
     print(f"\n{'='*66}")
     print(f"  FOLD {fold + 1} / {split_folds}")
@@ -532,9 +508,7 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(np.arange(len(full_dataset)
     gc.collect()
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  Final summary — both Train and Validation
-# ═══════════════════════════════════════════════════════════════════
+
 W   = 66
 SEP = "=" * W
 SEP2 = "-" * W
@@ -562,7 +536,7 @@ print(f"  Device              : {device}")
 print(f"  Log file            : {log_filename}")
 print(f"{SEP}")
 
-# ── Append summary block to CSV ───────────────────────────────────
+
 with open(log_filename, mode='a', newline='') as f_out:
     writer = csv.writer(f_out)
     writer.writerow([])
