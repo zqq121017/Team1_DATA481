@@ -20,7 +20,7 @@ from generate_model_graph import generate_model_graph
 _USER = {
     "depth":        3,        # number of Conv layers per branch
     "filters":      64,       # convolutional filters per layer
-    "kernel_size":  3,        # conv kernel size (int, same for all branches)
+    "kernel_size":  10,        # conv kernel size (int, same for all branches)
     "padding":      1,        # conv padding   (int, same for all branches)
     "learning_rate":0.0005,   # Adam LR
     "diff_map": {"Easy": 1, "Medium": 2, "Hard": 3},

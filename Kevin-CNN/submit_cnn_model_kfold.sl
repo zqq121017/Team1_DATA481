@@ -11,14 +11,13 @@
 #SBATCH --ntasks=1             # Run 1 instance of the task
 #SBATCH --cpus-per-task=64      #  cores to handle multimodal data
 #SBATCH --mem=32g              # 32GB RAM to prevent memory crashes
-#SBATCH --time=10:00:00        # 4 hour time limit
+#SBATCH --time=30:00:00        # 4 hour time limit
 #SBATCH --nodes=1
 
 
 # --- Environment Setup ---
 module load python/3.10.19      
-source activate pytorch         
-conda activate torch_env
+source activate torch_env         
 # --- Execution ---
 echo "Starting CPU-only task on node: $SLURMD_NODENAME"
 

@@ -62,21 +62,34 @@ def _trace_torch(hparams):
     import torch
     import torch.nn as nn
 
+    # Resolve all keys up-front — tolerates both old key names and new ones
+    _f        = hparams["filters"]
+    _k        = hparams["kernel_size"]
+    _p        = hparams["padding"]
+    _d        = hparams["depth"]
+    _fc_h     = hparams.get("fc_hidden",       128)
+    _drop     = hparams.get("dropout",         0.4)
+    _bio_ch   = hparams.get("bio_in_channels",   3)
+    _fusion   = hparams.get("fusion_input", hparams.get("fusion", 23616))
+    _eeg_flat = hparams.get("eeg_flat",      21504)
+    _bio_flat = hparams.get("bio_flat",        704)
+    _eeg_h    = hparams.get("eeg_spatial",      60)
+    _eeg_w    = hparams.get("eeg_timesteps",   384)
+    _bio_t    = hparams.get("bio_timesteps",    90)
+
     class _Model(nn.Module):
         def __init__(self):
             super().__init__()
-            f, k, p = hparams["filters"], hparams["kernel_size"], hparams["padding"]
-            d = hparams["depth"]
             eeg_layers = []
-            for i in range(d):
-                eeg_layers += [nn.Conv2d(1 if i == 0 else f, f, k, padding=p), nn.ReLU(), nn.MaxPool2d(2)]
+            for i in range(_d):
+                eeg_layers += [nn.Conv2d(1 if i == 0 else _f, _f, _k, padding=_p), nn.ReLU(), nn.MaxPool2d(2)]
             eeg_layers.append(nn.Flatten())
             self.eeg_branch = nn.Sequential(*eeg_layers)
 
             def bio():
                 layers = []
-                for i in range(d):
-                    layers += [nn.Conv1d(3 if i == 0 else f, f, k, padding=p), nn.ReLU(), nn.MaxPool1d(2)]
+                for i in range(_d):
+                    layers += [nn.Conv1d(_bio_ch if i == 0 else _f, _f, _k, padding=_p), nn.ReLU(), nn.MaxPool1d(2)]
                 layers.append(nn.Flatten())
                 return nn.Sequential(*layers)
 
@@ -84,8 +97,8 @@ def _trace_torch(hparams):
             self.pup_branch = bio()
             self.spc_branch = bio()
             self.fc = nn.Sequential(
-                nn.Linear(hparams["fusion"], hparams["fc_hidden"]), nn.ReLU(),
-                nn.Dropout(hparams["dropout"]), nn.Linear(hparams["fc_hidden"], 1),
+                nn.Linear(_fusion, _fc_h), nn.ReLU(),
+                nn.Dropout(_drop), nn.Linear(_fc_h, 1),
             )
 
         def forward(self, eeg, act, pup, spc):
@@ -115,13 +128,13 @@ def _trace_torch(hparams):
             rows.append((tag, "×".join(str(s) for s in shp) if shp else "flat"))
         return rows
 
-    traces["EEG Branch\n(Conv2d)"]      = _run_branch(model.eeg_branch, torch.zeros(1, 1, 60, 384))
-    traces["Action Branch\n(Conv1d)"]   = _run_branch(model.act_branch,  torch.zeros(1, 3, 90))
-    traces["Pupil Branch\n(Conv1d)"]    = _run_branch(model.pup_branch,  torch.zeros(1, 3, 90))
-    traces["Speech Branch\n(Conv1d)"]   = _run_branch(model.spc_branch,  torch.zeros(1, 3, 90))
+    traces["EEG Branch\n(Conv2d)"]    = _run_branch(model.eeg_branch, torch.zeros(1, 1, _eeg_h, _eeg_w))
+    traces["Action Branch\n(Conv1d)"] = _run_branch(model.act_branch, torch.zeros(1, _bio_ch, _bio_t))
+    traces["Pupil Branch\n(Conv1d)"]  = _run_branch(model.pup_branch, torch.zeros(1, _bio_ch, _bio_t))
+    traces["Speech Branch\n(Conv1d)"] = _run_branch(model.spc_branch, torch.zeros(1, _bio_ch, _bio_t))
 
     # Fusion
-    x = torch.cat([torch.zeros(1, hparams["eeg_flat"])] + [torch.zeros(1, hparams["bio_flat"])] * 3, dim=1)
+    x = torch.cat([torch.zeros(1, _eeg_flat)] + [torch.zeros(1, _bio_flat)] * 3, dim=1)
     fuse = [("Concat\n(×4 branches)", str(x.shape[1]))]
     for layer in model.fc:
         with torch.no_grad():
@@ -140,14 +153,23 @@ def _trace_torch(hparams):
 
 def _trace_analytic(hparams):
     """Pure-math shape simulation — no torch needed."""
-    f = hparams["filters"]
-    d = hparams["depth"]
+    f   = hparams["filters"]
+    d   = hparams["depth"]
+    k   = hparams["kernel_size"]
+    p   = hparams["padding"]
+    fc_h = hparams.get("fc_hidden", 128)
+    # support both key names used by main script vs standalone default
+    fusion = hparams.get("fusion_input", hparams.get("fusion", 23616))
+    eeg_h  = hparams.get("eeg_spatial",   60)
+    eeg_w  = hparams.get("eeg_timesteps", 384)
+    bio_t  = hparams.get("bio_timesteps", 90)
+    dr     = hparams.get("dropout", 0.4)
 
     # EEG
-    eeg, h, w = [("Input", "1×60×384")], 60, 384
+    eeg, h, w = [("Input", f"1×{eeg_h}×{eeg_w}")], eeg_h, eeg_w
     for i in range(d):
-        h, w = _co(h), _co(w)
-        eeg.append((f"Conv2d\n(k=3, p=1, f={f})\n+ReLU", f"{f}×{h}×{w}"))
+        h, w = _co(h, k, p), _co(w, k, p)
+        eeg.append((f"Conv2d\n(k={k}, p={p}, f={f})\n+ReLU", f"{f}×{h}×{w}"))
         h, w = _po(h), _po(w)
         eeg.append((f"MaxPool2d\n(k=2)", f"{f}×{h}×{w}"))
     eeg.append(("Flatten", f"{f*h*w:,}"))
@@ -155,10 +177,10 @@ def _trace_analytic(hparams):
     # 1-D branches
     bio_traces = {}
     for bname in ["Action Branch\n(Conv1d)", "Pupil Branch\n(Conv1d)", "Speech Branch\n(Conv1d)"]:
-        rows, l = [("Input", "3×90")], 90
+        rows, l = [("Input", f"3×{bio_t}")], bio_t
         for i in range(d):
-            l = _co(l)
-            rows.append((f"Conv1d\n(k=3, p=1, f={f})\n+ReLU", f"{f}×{l}"))
+            l = _co(l, k, p)
+            rows.append((f"Conv1d\n(k={k}, p={p}, f={f})\n+ReLU", f"{f}×{l}"))
             l = _po(l)
             rows.append((f"MaxPool1d\n(k=2)", f"{f}×{l}"))
         rows.append(("Flatten", f"{f*l:,}"))
@@ -166,12 +188,11 @@ def _trace_analytic(hparams):
 
     # Fusion
     fuse = [
-        ("Concat\n(×4 branches)",               f"{hparams['fusion']:,}"),
-        (f"Linear\n({hparams['fusion']:,}→{hparams['fc_hidden']})\n+ReLU",
-                                                 f"{hparams['fc_hidden']}"),
-        (f"Dropout\np={hparams['dropout']}",     f"{hparams['fc_hidden']}"),
-        ("Linear\n(128→1)",                      "1"),
-        ("Output\n(score)",                      "1"),
+        ("Concat\n(×4 branches)",              f"{fusion:,}"),
+        (f"Linear\n({fusion:,}→{fc_h})\n+ReLU", f"{fc_h}"),
+        (f"Dropout\np={dr}",                    f"{fc_h}"),
+        (f"Linear\n({fc_h}→1)",                 "1"),
+        ("Output\n(score)",                     "1"),
     ]
 
     return {
@@ -390,8 +411,11 @@ def render(G, meta, pos, traces, out_path, hparams):
 
     sub = (f"depth={hparams['depth']}  filters={hparams['filters']}  "
            f"kernel={hparams['kernel_size']}  padding={hparams['padding']}  "
-           f"dropout={hparams['dropout']}  fc_hidden={hparams['fc_hidden']}  "
-           f"lr={hparams['lr']}  batch={hparams['batch']}  epochs={hparams['epochs']}")
+           f"dropout={hparams.get('dropout', 0.4)}  fc_hidden={hparams.get('fc_hidden', 128)}  "
+           f"lr={hparams.get('learning_rate', hparams.get('lr', '?'))}  "
+           f"batch={hparams.get('batch_size', hparams.get('batch', '?'))}  "
+           f"epochs={hparams.get('epochs', '?')}  "
+           f"diff_map={hparams.get('diff_map', {})}")
     ax.text((min(all_x) + max(all_x)) / 2, title_y - 0.75, sub,
             ha="center", va="bottom",
             fontsize=7.5, color="#888888", fontfamily="monospace")
