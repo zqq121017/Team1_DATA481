@@ -181,15 +181,40 @@ class BasicMLP(nn.Module):
 def build_X_y(trial_data: pd.DataFrame, mode: str):
     """Build feature matrix X and target y for a given mode.
 
-    mode = 'all', 'eeg', 'pitch', 'speech', etc.
+    mode can be:
+    - simple: 'all', 'eeg', 'pitch', 'speech', 'pupil', 'yaw', 'thrust', 'action', etc.
+    - composite: 'eeg_pupil_speech', 'eeg_pupil', 'eeg_speech', 'pupil_speech',
+      'actions_speech', 'eeg_actions_pupil', 'eeg_actions_pupil_speech'.
     """
     base_exclude = ['teamID', 'sessionID', 'trialID', 'ringID', 'rings_passed', 'weighted_score']
 
+# Define composite modes as lists of substrings to OR together (no location)
+    composite = {
+        'eeg_pupil_speech': ['eeg', 'pupil', 'speech'],
+        'eeg_pupil': ['eeg', 'pupil'],
+        'eeg_speech': ['eeg', 'speech'],
+        'pupil_speech': ['pupil', 'speech'],
+        'actions_speech': ['action', 'speech'],
+        'eeg_actions_pupil': ['eeg', 'action', 'pupil'],
+        'eeg_actions_pupil_speech': ['eeg', 'action', 'pupil', 'speech'],
+    }
+
     if mode == 'all':
-        # Match disp1.ipynb: keep difficulty_score as an input feature
-        X_cols = [c for c in trial_data.columns if c not in base_exclude]
+        # Match disp1.ipynb: keep difficulty_score, exclude location (ring positions)
+        X_cols = [
+            c for c in trial_data.columns
+            if c not in base_exclude and 'location' not in c.lower()
+        ]
+    elif mode in composite:
+        subs = [s.lower() for s in composite[mode]]
+        X_cols = [
+            c
+            for c in trial_data.columns
+            if c not in base_exclude + ['difficulty_score']
+            and any(sub in c.lower() for sub in subs)
+        ]
     else:
-        # Match modality-specific notebooks: exclude difficulty_score and filter by substring
+        # Simple modality-specific substring filter
         X_cols = [
             c
             for c in trial_data.columns
@@ -206,12 +231,25 @@ def build_X_y(trial_data: pd.DataFrame, mode: str):
     return X, y, X_cols
 
 
-def run_mlp_cv(X, y, experiment_name: str, epochs: int = 2000, report_accuracy: bool = False):
+def run_mlp_cv(
+    X,
+    y,
+    experiment_name: str,
+    epochs: int = 2000,
+    report_accuracy: bool = False,
+    X_cols = None,
+    feature_weight_config = None,
+):
     """Run 5-fold CV MLP and print summary stats.
 
     Computes per-fold MSE, RMSE, MAE, and R-squared. If report_accuracy=True,
     also computes strict/lenient accuracy (±1 / ±3), matching the all-features
     experiment in disp1.ipynb.
+
+    If feature_weight_config is provided and has structure
+      {"enabled": bool, "weights": {"eeg": w_eeg, "speech": w_speech, "action": w_action}},
+    those groups are multiplicatively re-weighted (after scaling) based on
+    substring matches in feature names (requires X_cols to be provided).
     """
     kf = KFold(n_splits=5, shuffle=True, random_state=42)
     fold_metrics = []
@@ -227,6 +265,25 @@ def run_mlp_cv(X, y, experiment_name: str, epochs: int = 2000, report_accuracy: 
         scaler = StandardScaler()
         X_train = scaler.fit_transform(X_train)
         X_test = scaler.transform(X_test)
+
+        # Optional feature group weighting (e.g., make EEG/Speech lower, Action higher)
+        if (
+            feature_weight_config is not None
+            and feature_weight_config.get("enabled", False)
+            and X_cols is not None
+        ):
+            w_cfg = feature_weight_config.get("weights", {})
+            weights = np.ones(X_train.shape[1], dtype=float)
+            lower_cols = [c.lower() for c in X_cols]
+
+            for group, w in w_cfg.items():
+                g = group.lower()
+                for j, cname in enumerate(lower_cols):
+                    if g in cname:
+                        weights[j] *= float(w)
+
+            X_train = X_train * weights
+            X_test = X_test * weights
 
         X_train_t = torch.tensor(X_train, dtype=torch.float32, device=device)
         y_train_t = torch.tensor(y_train, dtype=torch.float32, device=device).view(-1, 1)
@@ -381,3 +438,133 @@ pupil_metrics = run_mlp_cv(
     report_accuracy=False,
 )
 #assign different weights to different modalities, lower to eeg and speech maybe, higher to action
+# Experiment 8: EEG + Pupil + Speech
+
+X_eps, y_eps, cols_eps = build_X_y(trial_data, mode='eeg_pupil_speech')
+feature_weight_config = {
+    "enabled": True,  # toggle this to False to disable weighting
+    "weights": {
+        "eeg": 0.5,
+        "speech": 0.5,
+        "action": 1.5,
+    },
+}
+eps_metrics = run_mlp_cv(
+    X_eps,
+    y_eps,
+    experiment_name='EEG + PUPIL + SPEECH',
+    epochs=2000,
+    report_accuracy=False,
+    X_cols=cols_eps,
+    feature_weight_config=feature_weight_config,
+)
+# Experiment 9: EEG + Pupil
+
+X_ep, y_ep, cols_ep = build_X_y(trial_data, mode='eeg_pupil')
+feature_weight_config = {
+    "enabled": True,  # toggle this to False to disable weighting
+    "weights": {
+        "eeg": 0.5,
+        "speech": 0.5,
+        "action": 1.5,
+    },
+}
+ep_metrics = run_mlp_cv(
+    X_ep,
+    y_ep,
+    experiment_name='EEG + PUPIL',
+    epochs=2000,
+    report_accuracy=False,
+    X_cols=cols_ep,
+    feature_weight_config=feature_weight_config,
+)
+# Experiment 10: EEG + Speech
+
+X_es, y_es, cols_es = build_X_y(trial_data, mode='eeg_speech')
+es_metrics = run_mlp_cv(
+    X_es,
+    y_es,
+    experiment_name='EEG + SPEECH',
+    epochs=2000,
+    report_accuracy=False,
+)
+# Experiment 11: Pupil + Speech
+
+X_ps, y_ps, cols_ps = build_X_y(trial_data, mode='pupil_speech')
+ps_metrics = run_mlp_cv(
+    X_ps,
+    y_ps,
+    experiment_name='PUPIL + SPEECH',
+    epochs=2000,
+    report_accuracy=False,
+)
+# Experiment 12: Actions (all) only  [behavior-only baseline]
+
+X_beh, y_beh, cols_beh = build_X_y(trial_data, mode='action')
+beh_metrics = run_mlp_cv(
+    X_beh,
+    y_beh,
+    experiment_name='ACTIONS ONLY (behavior baseline)',
+    epochs=2000,
+    report_accuracy=False,
+)
+# Experiment 13: Actions (all) + Speech
+
+X_bhs, y_bhs, cols_bhs = build_X_y(trial_data, mode='actions_speech')
+feature_weight_config = {
+    "enabled": True,  # toggle this to False to disable weighting
+    "weights": {
+        "eeg": 0.5,
+        "speech": 0.5,
+        "action": 1.5,
+    },
+}
+bhs_metrics = run_mlp_cv(
+    X_bhs,
+    y_bhs,
+    experiment_name='ACTIONS + SPEECH',
+    epochs=2000,
+    report_accuracy=False,
+    X_cols=cols_bhs,
+    feature_weight_config=feature_weight_config,
+)
+# Experiment 14: EEG + Actions (all) + Pupil
+
+X_eap, y_eap, cols_eap = build_X_y(trial_data, mode='eeg_actions_pupil')
+feature_weight_config = {
+    "enabled": True,  # toggle this to False to disable weighting
+    "weights": {
+        "eeg": 0.5,
+        "speech": 0.5,
+        "action": 1.5,
+    },
+}
+eap_metrics = run_mlp_cv(
+    X_eap,
+    y_eap,
+    experiment_name='EEG + ACTIONS + PUPIL',
+    epochs=2000,
+    report_accuracy=False,
+    X_cols=cols_eap,
+    feature_weight_config=feature_weight_config,
+)
+# Experiment 15: EEG + Actions (all) + Pupil + Speech  [full stack]
+
+X_eaps, y_eaps, cols_eaps = build_X_y(trial_data, mode='eeg_actions_pupil_speech')
+feature_weight_config = {
+    "enabled": True,  # toggle this to False to disable weighting
+    "weights": {
+        "eeg": 0.5,
+        "speech": 0.5,
+        "action": 1.5,
+    },
+}
+eaps_metrics = run_mlp_cv(
+    X_eaps,
+    y_eaps,
+    experiment_name='EEG + ACTIONS + PUPIL + SPEECH',
+    epochs=2000,
+    report_accuracy=False,
+    X_cols=cols_eaps,
+    feature_weight_config=feature_weight_config,
+)
