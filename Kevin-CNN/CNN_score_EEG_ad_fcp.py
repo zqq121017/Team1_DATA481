@@ -47,8 +47,8 @@ FREQ_BANDS     = {
     "delta": (0.5,  4.0),
     "alpha": (8.0, 13.0),
 }
-SFREQ          = 128          # EEG sampling frequency in Hz
-NPERSEG        = 128           # STFT window length → freq resolution = 128/64 = 2 Hz
+SFREQ          = 256          # EEG sampling frequency in Hz
+NPERSEG        = 64           # STFT window length → freq resolution = 128/64 = 2 Hz
                               # rfft bins: 0,2,4,6,8,10,12,14,...Hz  (33 bins total)
                               # Delta 0.5–4 Hz  → bins at 2Hz(1), 4Hz(2)           → 2 bins
                               # Alpha 8–13 Hz   → bins at 8Hz(4),10Hz(5),12Hz(6)   → 3 bins
@@ -60,22 +60,25 @@ NOVERLAP       = 56           # hop = 8 samples → T ≈ ceil(384/8) = 48 time 
 #  USER-EDITABLE HYPERPARAMETERS
 # ═══════════════════════════════════════════════════════════════════════
 _USER = {
-    "depth":         3,
-    "filters":       64,
-    "kernel_size":   3,          # reduced from 10; TF maps are small (T≈48, F≈4)
-    "padding":       1,
-    "learning_rate": 0.0005,
-    "diff_map":      {"Easy": 1, "Medium": 2, "Hard": 3},
+    "depth":               3,
+    "filters":             64,
+    "kernel_size":         3,       # reduced from 10; TF maps are small (T≈49, F≈5)
+    "padding":             1,
+    "learning_rate":       0.0005,
+    "weight_decay":        1e-4,    # AdamW decoupled L2 regularisation
+    "early_stop_patience": 30,      # stop if val_MSE doesn't improve for 15 epochs
+    "early_stop_delta":    0.001,   # minimum drop in val_MSE to count as improvement
+    "diff_map":            {"Easy": 1, "Medium": 2, "Hard": 3},
 }
 
 _FIXED = {
     "model_name":         "FullADCTModel_TFPower_TrialScore",
     "dropout":            0.4,
     "fc_hidden":          128,
-    "optimizer":          "Adam",
+    "optimizer":          "AdamW",
     "loss_fn":            "MSELoss",
     "batch_size":         32,
-    "epochs":             100,
+    "epochs":             300,
     "kfold_splits":       5,
     "kfold_shuffle":      True,
     "kfold_random_state": 42,
@@ -212,12 +215,15 @@ def _write_csv_header(path, hparams):
         w_csv.writerow(["stft_freqs_hz", str(list(_PROBE_FREQS[_BAND_IDX].round(2)))])
         w_csv.writerow([])
         w_csv.writerow(["# USER-EDITABLE HYPERPARAMETERS"])
-        w_csv.writerow(["depth",         hparams["depth"]])
-        w_csv.writerow(["filters",       hparams["filters"]])
-        w_csv.writerow(["kernel_size",   hparams["kernel_size"]])
-        w_csv.writerow(["padding",       hparams["padding"]])
-        w_csv.writerow(["learning_rate", hparams["learning_rate"]])
-        w_csv.writerow(["diff_map",      str(hparams["diff_map"])])
+        w_csv.writerow(["depth",                hparams["depth"]])
+        w_csv.writerow(["filters",              hparams["filters"]])
+        w_csv.writerow(["kernel_size",          hparams["kernel_size"]])
+        w_csv.writerow(["padding",              hparams["padding"]])
+        w_csv.writerow(["learning_rate",        hparams["learning_rate"]])
+        w_csv.writerow(["weight_decay",         hparams["weight_decay"]])
+        w_csv.writerow(["early_stop_patience",  hparams["early_stop_patience"]])
+        w_csv.writerow(["early_stop_delta",     hparams["early_stop_delta"]])
+        w_csv.writerow(["diff_map",             str(hparams["diff_map"])])
         w_csv.writerow([])
         w_csv.writerow(["# FIXED CONSTANTS"])
         for key in ("model_name","dropout","fc_hidden","optimizer","loss_fn",
@@ -259,11 +265,15 @@ def _write_csv_header(path, hparams):
         w_csv.writerow([f"  Dropout(p={hparams['dropout']})"])
         w_csv.writerow([f"  Linear({fc_h} → 1)  [regression: trial total score]"])
         w_csv.writerow([])
+        w_csv.writerow(["# NOTE: Only epochs where val_MSE improved are logged"])
+        w_csv.writerow(["# [BEST] marks the epoch restored at early stopping"])
+        w_csv.writerow([])
         w_csv.writerow(["Epoch",
                         "Train_MSE",
                         "Val_MSE", "Val_RMSE", "Val_MAE", "Val_R2",
                         "Fold",
-                        "Total_Params", "Trainable_Params"])
+                        "Total_Params", "Trainable_Params",
+                        "Note"])
 
 _write_csv_header(log_filename, HPARAMS)
 print(f"Logging to: {log_filename}")
@@ -755,13 +765,24 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(np.arange(len(full_dataset)
     val_loader   = DataLoader(val_sub,   batch_size=HPARAMS["batch_size"], shuffle=False)
 
     model     = FullADCTModel_TFPower(HPARAMS).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=HPARAMS["learning_rate"])
+    optimizer = optim.AdamW(
+        model.parameters(),
+        lr=HPARAMS["learning_rate"],
+        weight_decay=HPARAMS["weight_decay"],
+    )
     criterion = nn.MSELoss()
 
     if fold == 0:
         total_params, trainable_params = print_model_details(model, HPARAMS)
     else:
         total_params, trainable_params = count_params(model)
+
+    # ── Early stopping state ─────────────────────────────────────────────
+    best_val_mse    = float("inf")
+    best_epoch      = 0
+    patience_counter= 0
+    best_weights    = None   # deepcopy of state_dict at best val_MSE
+    best_metrics    = {}     # full metrics snapshot at best epoch
 
     for epoch in range(HPARAMS["epochs"]):
         # ── Train ────────────────────────────────────────────────────────
@@ -802,23 +823,83 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(np.arange(len(full_dataset)
         v_mae  = float(mean_absolute_error(val_targets_ep, val_preds))
         v_r2   = float(r2_score(val_targets_ep, val_preds))
 
+        # ── Check improvement ────────────────────────────────────────────
+        improved = v_mse < (best_val_mse - HPARAMS["early_stop_delta"])
+
+        if improved:
+            best_val_mse     = v_mse
+            best_epoch       = epoch + 1
+            patience_counter = 0
+            # Save best weights (move to CPU to save GPU memory)
+            best_weights = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            best_metrics = dict(
+                tr_mse=tr_mse, tr_rmse=tr_rmse, tr_mae=tr_mae, tr_r2=tr_r2,
+                v_mse=v_mse,   v_rmse=v_rmse,   v_mae=v_mae,   v_r2=v_r2,
+            )
+            # ── Log only improving epochs ─────────────────────────────────
+            with open(log_filename, mode='a', newline='') as f_out:
+                writer = csv.writer(f_out)
+                writer.writerow([
+                    epoch + 1,
+                    f"{tr_mse:.4f}",
+                    f"{v_mse:.4f}", f"{v_rmse:.4f}", f"{v_mae:.4f}", f"{v_r2:.4f}",
+                    fold + 1,
+                    total_params, trainable_params,
+                    "improved",
+                ])
+            print(
+                f"  Epoch {epoch+1:03d} ▲ | "
+                f"Train MSE:{tr_mse:.4f} RMSE:{tr_rmse:.4f} "
+                f"MAE:{tr_mae:.4f} R²:{tr_r2:.4f} | "
+                f"Val  MSE:{v_mse:.4f} RMSE:{v_rmse:.4f} "
+                f"MAE:{v_mae:.4f} R²:{v_r2:.4f}  ← best"
+            )
+        else:
+            patience_counter += 1
+            print(
+                f"  Epoch {epoch+1:03d}   | "
+                f"Train MSE:{tr_mse:.4f} | "
+                f"Val  MSE:{v_mse:.4f}  "
+                f"(no improvement {patience_counter}/{HPARAMS['early_stop_patience']})"
+            )
+
+        # ── Early stopping check ─────────────────────────────────────────
+        if patience_counter >= HPARAMS["early_stop_patience"]:
+            print(f"\n  ⏹  Early stopping triggered at epoch {epoch+1}. "
+                  f"Best epoch: {best_epoch}  Val MSE: {best_val_mse:.4f}")
+            break
+
+    # ── Restore best weights & log the best row with [BEST] marker ───────
+    if best_weights is not None:
+        model.load_state_dict({k: v.to(device) for k, v in best_weights.items()})
         with open(log_filename, mode='a', newline='') as f_out:
             writer = csv.writer(f_out)
             writer.writerow([
-                epoch + 1,
-                f"{tr_mse:.4f}",
-                f"{v_mse:.4f}", f"{v_rmse:.4f}", f"{v_mae:.4f}", f"{v_r2:.4f}",
+                best_epoch,
+                f"{best_metrics['tr_mse']:.4f}",
+                f"{best_metrics['v_mse']:.4f}",
+                f"{best_metrics['v_rmse']:.4f}",
+                f"{best_metrics['v_mae']:.4f}",
+                f"{best_metrics['v_r2']:.4f}",
                 fold + 1,
                 total_params, trainable_params,
+                "[BEST] restored",
             ])
+        print(f"  ✔  Best weights restored — Epoch {best_epoch} | "
+              f"Val MSE:{best_metrics['v_mse']:.4f}  "
+              f"RMSE:{best_metrics['v_rmse']:.4f}  "
+              f"MAE:{best_metrics['v_mae']:.4f}  "
+              f"R²:{best_metrics['v_r2']:.4f}")
 
-        print(
-            f"  Epoch {epoch+1:03d} | "
-            f"Train  MSE:{tr_mse:.4f}  RMSE:{tr_rmse:.4f}  "
-            f"MAE:{tr_mae:.4f}  R²:{tr_r2:.4f} | "
-            f"Val  MSE:{v_mse:.4f}  RMSE:{v_rmse:.4f}  "
-            f"MAE:{v_mae:.4f}  R²:{v_r2:.4f}"
-        )
+    # ── Collect fold summary from best epoch (not final epoch) ───────────
+    tr_mse  = best_metrics.get("tr_mse",  tr_mse)
+    tr_rmse = best_metrics.get("tr_rmse", tr_rmse)
+    tr_mae  = best_metrics.get("tr_mae",  tr_mae)
+    tr_r2   = best_metrics.get("tr_r2",   tr_r2)
+    v_mse   = best_metrics.get("v_mse",   v_mse)
+    v_rmse  = best_metrics.get("v_rmse",  v_rmse)
+    v_mae   = best_metrics.get("v_mae",   v_mae)
+    v_r2    = best_metrics.get("v_r2",    v_r2)
 
     train_mse_list.append(tr_mse);   train_rmse_list.append(tr_rmse)
     train_mae_list.append(tr_mae);   train_r2_list.append(tr_r2)
@@ -837,8 +918,10 @@ SEP  = "=" * W
 SEP2 = "-" * W
 
 print(f"\n{SEP}")
-print(f"  {split_folds}-FOLD CROSS-VALIDATION SUMMARY  (final epoch per fold)")
+print(f"  {split_folds}-FOLD CROSS-VALIDATION SUMMARY  (best epoch per fold)")
 print(f"  TASK: Trial Total Score Prediction  |  EEG: TF-Power (delta+alpha)")
+print(f"  Optimizer: AdamW  |  Early Stopping: patience={HPARAMS['early_stop_patience']}, "
+      f"delta={HPARAMS['early_stop_delta']}")
 print(f"{SEP}")
 print(f"  {'Metric':<10}  {'Train Mean':>12}  {'Train SD':>10}  "
       f"{'Val Mean':>12}  {'Val SD':>10}")
@@ -864,8 +947,11 @@ print(f"{SEP}")
 with open(log_filename, mode='a', newline='') as f_out:
     writer = csv.writer(f_out)
     writer.writerow([])
-    writer.writerow(["# CROSS-VALIDATION SUMMARY (final epoch per fold)"])
+    writer.writerow(["# CROSS-VALIDATION SUMMARY (best epoch per fold — early stopping)"])
     writer.writerow(["# TASK: Trial Total Score  |  EEG: STFT TF-Power delta+alpha"])
+    writer.writerow([f"# Optimizer: AdamW  weight_decay={HPARAMS['weight_decay']}  "
+                     f"patience={HPARAMS['early_stop_patience']}  "
+                     f"delta={HPARAMS['early_stop_delta']}"])
     writer.writerow(["Metric",
                      "Train_Mean", "Train_SD",
                      "Val_Mean",   "Val_SD"])
