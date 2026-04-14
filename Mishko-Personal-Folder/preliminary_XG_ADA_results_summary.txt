@@ -1,0 +1,16 @@
+🚀 Training Models on full dataset...
+✅ AdaBoost Accuracy: 0.89
+✅ XGBoost Accuracy: 0.78
+🚀 Opening Feature Importance windows...
+
+🛡️ Running 5-Fold Cross-Validation for BOTH models...
+
+========================================
+📊 FINAL SCIENTIFIC RESULTS
+========================================
+○ AdaBoost Average CV:   0.49
+○ XGBoost Average CV:    0.69
+----------------------------------------
+○ AdaBoost Fold Scores:  [0.55555556 0.33333333 0.55555556 0.44444444 0.55555556]
+○ XGBoost Fold Scores:   [0.55555556 0.66666667 0.88888889 0.77777778 0.55555556]
+========================================
