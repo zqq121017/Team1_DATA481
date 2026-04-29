@@ -81,7 +81,7 @@ def pilot_to_tfpower(series):
 # ═══════════════════════════════════════════════════════════════════════
 #  DATA LOADING & MERGING
 # ═══════════════════════════════════════════════════════════════════════
-base_path  = "../../data"
+base_path  = "../../../data"
 merge_keys = ['teamID', 'sessionID', 'trialID', 'ringID']
 
 def load_pkl(filename):

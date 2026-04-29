@@ -178,7 +178,7 @@ base_path  = "../../data"
 merge_keys = ['teamID', 'sessionID', 'trialID', 'ringID']
 
 def load_pkl(filename):
-    with open(os.path.join(base_path, filename), 'rb') as f:
+with open(os.path.join(base_path, filename), 'rb') as f:
         return pickle.load(f)
 
 mod_files = ['epoched_eeg.pkl', 'epoched_pupil.pkl',
