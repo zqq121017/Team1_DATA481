@@ -1,0 +1,91 @@
+/home/kevin/Team1_DATA481/MLP/GCN-refined/mlp_eeg_refined.py:89: DeprecationWarning: numpy.core.numeric is deprecated and has been renamed to numpy._core.numeric. The numpy._core namespace contains private NumPy internals and its use is discouraged, as NumPy internals can change without warning in any release. In practice, most real-world usage of numpy.core is to access functionality in the public NumPy API. If that is the case, use the public NumPy API. If not, you are using NumPy internals. If you would still like to access an internal attribute, use numpy._core.numeric._frombuffer.
+  return pickle.load(f)
+/home/kevin/Team1_DATA481/MLP/GCN-refined/mlp_eeg_refined.py:89: DeprecationWarning: numpy.core.numeric is deprecated and has been renamed to numpy._core.numeric. The numpy._core namespace contains private NumPy internals and its use is discouraged, as NumPy internals can change without warning in any release. In practice, most real-world usage of numpy.core is to access functionality in the public NumPy API. If that is the case, use the public NumPy API. If not, you are using NumPy internals. If you would still like to access an internal attribute, use numpy._core.numeric._frombuffer.
+  return pickle.load(f)
+/home/kevin/Team1_DATA481/MLP/GCN-refined/mlp_eeg_refined.py:89: DeprecationWarning: numpy.core.numeric is deprecated and has been renamed to numpy._core.numeric. The numpy._core namespace contains private NumPy internals and its use is discouraged, as NumPy internals can change without warning in any release. In practice, most real-world usage of numpy.core is to access functionality in the public NumPy API. If that is the case, use the public NumPy API. If not, you are using NumPy internals. If you would still like to access an internal attribute, use numpy._core.numeric._frombuffer.
+  return pickle.load(f)
+/home/kevin/Team1_DATA481/MLP/GCN-refined/mlp_eeg_refined.py:89: DeprecationWarning: numpy.core.numeric is deprecated and has been renamed to numpy._core.numeric. The numpy._core namespace contains private NumPy internals and its use is discouraged, as NumPy internals can change without warning in any release. In practice, most real-world usage of numpy.core is to access functionality in the public NumPy API. If that is the case, use the public NumPy API. If not, you are using NumPy internals. If you would still like to access an internal attribute, use numpy._core.numeric._frombuffer.
+  return pickle.load(f)
+/home/kevin/Team1_DATA481/MLP/GCN-refined/mlp_eeg_refined.py:89: DeprecationWarning: numpy.core.numeric is deprecated and has been renamed to numpy._core.numeric. The numpy._core namespace contains private NumPy internals and its use is discouraged, as NumPy internals can change without warning in any release. In practice, most real-world usage of numpy.core is to access functionality in the public NumPy API. If that is the case, use the public NumPy API. If not, you are using NumPy internals. If you would still like to access an internal attribute, use numpy._core.numeric._frombuffer.
+  return pickle.load(f)
+/home/kevin/Team1_DATA481/MLP/GCN-refined/mlp_eeg_refined.py:89: DeprecationWarning: numpy.core.numeric is deprecated and has been renamed to numpy._core.numeric. The numpy._core namespace contains private NumPy internals and its use is discouraged, as NumPy internals can change without warning in any release. In practice, most real-world usage of numpy.core is to access functionality in the public NumPy API. If that is the case, use the public NumPy API. If not, you are using NumPy internals. If you would still like to access an internal attribute, use numpy._core.numeric._frombuffer.
+  return pickle.load(f)
+Loading and merging data...
+  Merging epoched_eeg.pkl...
+  Merging epoched_pupil.pkl...
+  Merging epoched_speech_event.pkl...
+  Merging epoched_action.pkl...
+  Merging epoched_raw_location.pkl...
+
+Transforming EEG to Time-Frequency power maps...
+Processing Bio signals (Action, Pupil, Speech)...
+Aggregating to trial level...
+Processing Time statistics...
+  Total trials: 1074
+Flattening features for MLP...
+Training on cuda...
+
+--- Fold 1 ---
+  Epoch 050 | Train MSE: 49.4821 | Val MSE: 44.2832
+  Epoch 100 | Train MSE: 28.6289 | Val MSE: 25.2200
+  Epoch 150 | Train MSE: 11.5983 | Val MSE: 11.6927
+  Epoch 200 | Train MSE: 5.7138 | Val MSE: 6.9646
+  Epoch 250 | Train MSE: 5.3940 | Val MSE: 6.5831
+  Epoch 300 | Train MSE: 4.3322 | Val MSE: 6.4066
+  Best Val MSE: 5.7872 | MAE: 1.3305 | R2: 0.8855
+
+--- Fold 2 ---
+  Epoch 050 | Train MSE: 48.0392 | Val MSE: 45.7859
+  Epoch 100 | Train MSE: 28.5223 | Val MSE: 26.2886
+  Epoch 150 | Train MSE: 12.1318 | Val MSE: 23.6847
+  Epoch 200 | Train MSE: 5.3666 | Val MSE: 24.2455
+  Epoch 250 | Train MSE: 4.8733 | Val MSE: 25.7780
+  Epoch 300 | Train MSE: 5.3321 | Val MSE: 25.1428
+  Best Val MSE: 22.3246 | MAE: 3.2257 | R2: 0.5404
+
+--- Fold 3 ---
+  Epoch 050 | Train MSE: 51.0014 | Val MSE: 46.1916
+  Epoch 100 | Train MSE: 37.2042 | Val MSE: 34.2617
+  Epoch 150 | Train MSE: 15.9679 | Val MSE: 14.1046
+  Epoch 200 | Train MSE: 7.7049 | Val MSE: 6.5006
+  Epoch 250 | Train MSE: 5.8919 | Val MSE: 5.5262
+  Epoch 300 | Train MSE: 5.7739 | Val MSE: 5.4688
+  Best Val MSE: 4.8753 | MAE: 1.3543 | R2: 0.8982
+
+--- Fold 4 ---
+  Epoch 050 | Train MSE: 49.6938 | Val MSE: 46.0255
+  Epoch 100 | Train MSE: 30.4038 | Val MSE: 28.7636
+  Epoch 150 | Train MSE: 13.3195 | Val MSE: 12.6222
+  Epoch 200 | Train MSE: 5.7478 | Val MSE: 4.6341
+  Epoch 250 | Train MSE: 5.7634 | Val MSE: 4.4482
+  Epoch 300 | Train MSE: 5.3689 | Val MSE: 4.8923
+  Best Val MSE: 4.0025 | MAE: 1.2998 | R2: 0.9208
+
+--- Fold 5 ---
+  Epoch 050 | Train MSE: 50.5670 | Val MSE: 50.7057
+  Epoch 100 | Train MSE: 34.2166 | Val MSE: 35.9183
+  Epoch 150 | Train MSE: 14.2710 | Val MSE: 16.5419
+  Epoch 200 | Train MSE: 7.5512 | Val MSE: 6.2123
+  Epoch 250 | Train MSE: 5.0313 | Val MSE: 4.6961
+  Epoch 300 | Train MSE: 5.2879 | Val MSE: 6.1967
+  Best Val MSE: 4.0186 | MAE: 1.3062 | R2: 0.9219
+
+Training logs saved to: training_logs/5_kfold_mlp_eeg_refined_20260501_003237.csv
+
+========================================
+OVERFITTING ANALYSIS
+========================================
+Mean Train MSE: 7.7944
+Mean Val MSE:   8.2016
+Performance Gap: 5.22% (Val is 5.22% higher than Train)
+STATUS: Low Overfitting. The model generalizes well.
+
+Loss curve plot saved to: overfitting_analysis.png
+
+========================================
+FINAL CROSS-VALIDATION RESULTS
+========================================
+MSE:  8.2016 ± 7.0920
+MAE:  1.7033 ± 0.7614
+R2:   0.8334  ± 0.1471
+========================================

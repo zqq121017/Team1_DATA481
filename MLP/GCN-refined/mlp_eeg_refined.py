@@ -219,11 +219,26 @@ class BasicMLP(nn.Module):
 # ═══════════════════════════════════════════════════════════════════════
 #  TRAINING LOOP (5-Fold CV)
 # ═══════════════════════════════════════════════════════════════════════
+import csv
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Training on {device}...")
 
-kf = KFold(n_splits=HPARAMS["kfold_splits"], shuffle=True, random_state=42)
+kf = KFold(n_splits=HPARAMS["kfold_splits"], shuffle=True, random_state=123)
 all_metrics = []
+
+# Setup CSV Logging
+timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+log_dir = "training_logs"
+os.makedirs(log_dir, exist_ok=True)
+csv_filename = os.path.join(log_dir, f"{HPARAMS['kfold_splits']}_kfold_mlp_eeg_refined_{timestamp}.csv")
+
+with open(csv_filename, mode='w', newline='') as f:
+    writer = csv.writer(f)
+    writer.writerow(["Epoch", "Train_MSE", "Val_MSE", "Val_RMSE", "Val_MAE", "Val_R2", "Fold", "Total_Params", "Trainable_Params"])
+
+best_overall_val_mse = float('inf')
+best_model_state = None
 
 for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
     print(f"\n--- Fold {fold+1} ---")
@@ -245,8 +260,10 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
     optimizer = optim.Adam(model.parameters(), lr=HPARAMS["learning_rate"], weight_decay=HPARAMS["weight_decay"])
     criterion = nn.MSELoss()
     
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
     best_val_mse = float('inf')
-    patience_cnt = 0
     fold_train_history = []
     fold_val_history = []
     
@@ -266,23 +283,28 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
         
         fold_train_history.append(tr_loss.item())
         fold_val_history.append(v_mse)
+        
+        v_preds_np = v_preds.cpu().numpy()
+        v_rmse = float(np.sqrt(v_mse))
+        v_mae = float(mean_absolute_error(y_val, v_preds_np))
+        v_r2 = float(r2_score(y_val, v_preds_np))
+        
+        with open(csv_filename, mode='a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([epoch + 1, tr_loss.item(), v_mse, v_rmse, v_mae, v_r2, fold + 1, total_params, trainable_params])
 
-        if v_mse < best_val_mse - HPARAMS["early_stop_delta"]:
+        if v_mse < best_val_mse - 0.001:
             best_val_mse = v_mse
-            patience_cnt = 0
             # Snapshot metrics
-            best_mae = mean_absolute_error(y_val, v_preds.cpu().numpy())
-            best_r2 = r2_score(y_val, v_preds.cpu().numpy())
+            best_mae = v_mae
+            best_r2 = v_r2
             best_tr_mse = tr_loss.item()
-        else:
-            patience_cnt += 1
+            if v_mse < best_overall_val_mse:
+                best_overall_val_mse = v_mse
+                best_model_state = {k: v.cpu() for k, v in model.state_dict().items()}
             
         if (epoch + 1) % 50 == 0:
             print(f"  Epoch {epoch+1:03d} | Train MSE: {tr_loss.item():.4f} | Val MSE: {v_mse:.4f}")
-            
-        if patience_cnt >= HPARAMS["early_stop_patience"]:
-            print(f"  Early stopping at epoch {epoch+1}")
-            break
             
     print(f"  Best Val MSE: {best_val_mse:.4f} | MAE: {best_mae:.4f} | R2: {best_r2:.4f}")
     all_metrics.append({
@@ -293,6 +315,13 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
         'train_hist': fold_train_history,
         'val_hist': fold_val_history
     })
+
+print(f"\nTraining logs saved to: {csv_filename}")
+
+if best_model_state is not None:
+    model_filename = csv_filename.replace('.csv', '.pth')
+    torch.save(best_model_state, model_filename)
+    print(f"Best model weights saved to: {model_filename}")
 
 # ═══════════════════════════════════════════════════════════════════════
 #  OVERFITTING ANALYSIS & VISUALIZATION
@@ -333,7 +362,7 @@ plt.ylabel("MSE")
 plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
 plt.grid(True, alpha=0.3)
 plt.tight_layout()
-plot_path = "MLP-refined/overfitting_analysis.png"
+plot_path = "overfitting_analysis.png"
 plt.savefig(plot_path)
 print(f"\nLoss curve plot saved to: {plot_path}")
 

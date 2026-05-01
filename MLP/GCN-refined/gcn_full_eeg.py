@@ -15,7 +15,7 @@ from torch.utils.data import TensorDataset, DataLoader
 # ═══════════════════════════════════════════════════════════════════════
 #  CONFIGURATION 
 # ═══════════════════════════════════════════════════════════════════════
-EEG_CH_INDICES = [12, 18, 16]          # Fz, Cz, POz
+EEG_CH_INDICES = list(range(20))       # All 20 channels
 FREQ_BANDS     = {"delta": (0.5, 4.0), "alpha": (8.0, 13.0)}
 SFREQ          = 256
 NPERSEG        = 64
@@ -56,8 +56,8 @@ def eeg_to_tfpower_uniform(raw_20ch_384):
         pad_w = f_max - m.shape[1]
         padded.append(np.pad(m, ((0, 0), (0, pad_w))) if pad_w > 0 else m)
     
-    # Returns shape (6, T, F_max). The 6 bands are:
-    # Fz_delta, Fz_alpha, Cz_delta, Cz_alpha, POz_delta, POz_alpha
+    # Returns shape (40, T, F_max). The 40 bands are:
+    # Ch0_delta, Ch0_alpha, Ch1_delta, Ch1_alpha, ..., Ch19_delta, Ch19_alpha
     return np.stack(padded, axis=0).astype(np.float32)
 
 def pilot_to_tfpower(series):
@@ -80,6 +80,7 @@ def load_pkl(filename):
         return pickle.load(f)
 
 print("Loading and merging data...")
+# NOTE: Speech signal is removed as per instruction
 mod_files = ['epoched_eeg.pkl', 'epoched_pupil.pkl', 'epoched_action.pkl']
 df_main = load_pkl('team_performance.pkl')[merge_keys + ['difficulty']]
 
@@ -115,7 +116,7 @@ print("Aggregating to trial level...")
 trial_keys = ['teamID', 'sessionID', 'trialID']
 
 def aggregate_eeg(series):
-    return np.mean(list(series), axis=0) # (6, T, F)
+    return np.mean(list(series), axis=0) # (40, T, F)
 
 def aggregate_bio_mean(series):
     return np.mean(list(series), axis=0) # (T_fixed,)
@@ -133,11 +134,10 @@ for bio in ['Action', 'Pupil']:
 trial_df.rename(columns={'ring_score': 'trial_total_score'}, inplace=True)
 
 # Build Tensors
-X_eeg = np.stack(trial_df['eeg_data'].values).astype(np.float32) # (N, 6, T, F)
+X_eeg = np.stack(trial_df['eeg_data'].values).astype(np.float32) # (N, 40, T, F)
 
-# Reshape EEG from (N, 6, T, F) to (N, 3 electrodes, 2 bands, T, F)
-# Indices 0,1 are Fz | 2,3 are Cz | 4,5 are POz
-X_eeg = X_eeg.reshape(X_eeg.shape[0], 3, 2, X_eeg.shape[2], X_eeg.shape[3])
+# Reshape EEG from (N, 40, T, F) to (N, 20 electrodes, 2 bands, T, F)
+X_eeg = X_eeg.reshape(X_eeg.shape[0], 20, 2, X_eeg.shape[2], X_eeg.shape[3])
 
 X_act = np.stack(trial_df['Action_seq'].values).astype(np.float32)[:, np.newaxis, :] # (N, 1, T_act)
 X_pup = np.stack(trial_df['Pupil_seq'].values).astype(np.float32)[:, np.newaxis, :] # (N, 1, T_pup)
@@ -209,9 +209,8 @@ class SensorGraphModel(nn.Module):
         )
         
         # Step C: GCN Fusion
-        # Adaptive Adjacency Matrix (5 nodes: 3 Brain, 1 Behavior, 1 Autonomic)
-        # Nodes: 0: Fz, 1: Cz, 2: POz, 3: Action, 4: Pupil
-        self.adj = nn.Parameter(torch.rand(5, 5))
+        # Adaptive Adjacency Matrix (22 nodes: 20 Brain, 1 Behavior, 1 Autonomic)
+        self.adj = nn.Parameter(torch.rand(22, 22))
         
         # Graph Convolution Layers
         self.gcn1 = GraphConvLayer(embed_dim, gcn_dim)
@@ -232,14 +231,14 @@ class SensorGraphModel(nn.Module):
         node_act = self.act_cnn(act).unsqueeze(1) # (B, 1, embed_dim)
         node_pup = self.pup_cnn(pup).unsqueeze(1) # (B, 1, embed_dim)
         
-        # Encode Brain Nodes (EEG electrodes Fz, Cz, POz)
-        # eeg: (B, 3, 2, T, F)
+        # Encode Brain Nodes (20 EEG electrodes)
+        # eeg: (B, 20, 2, T, F)
         eeg_nodes = []
-        for i in range(3):
+        for i in range(20):
             eeg_nodes.append(self.eeg_cnn(eeg[:, i]).unsqueeze(1)) # (B, 1, embed_dim)
             
-        # Combine all 5 nodes: (B, 5, embed_dim)
-        nodes = torch.cat([eeg_nodes[0], eeg_nodes[1], eeg_nodes[2], node_act, node_pup], dim=1)
+        # Combine all 22 nodes: (B, 22, embed_dim)
+        nodes = torch.cat([*eeg_nodes, node_act, node_pup], dim=1)
         
         # Normalize adaptive adjacency matrix
         adj_norm = torch.softmax(self.adj, dim=-1)
@@ -270,7 +269,7 @@ all_metrics = []
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 log_dir = "training_logs"
 os.makedirs(log_dir, exist_ok=True)
-csv_filename = os.path.join(log_dir, f"{HPARAMS['kfold_splits']}_kfold_gcn_sensor_graph_{timestamp}.csv")
+csv_filename = os.path.join(log_dir, f"{HPARAMS['kfold_splits']}_kfold_gcn_full_eeg_{timestamp}.csv")
 
 with open(csv_filename, mode='w', newline='') as f:
     writer = csv.writer(f)
@@ -306,6 +305,8 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(X_eeg)):
     val_loader = DataLoader(val_data, batch_size=HPARAMS["batch_size"], shuffle=False)
     
     best_val_mse = float('inf')
+    patience = 30
+    patience_cnt = 0
     
     for epoch in range(HPARAMS["epochs"]):
         model.train()
@@ -344,14 +345,21 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(X_eeg)):
         
         if val_loss < best_val_mse - 0.001:
             best_val_mse = val_loss
+            patience_cnt = 0
             best_mae = v_mae
             best_r2 = v_r2
             if val_loss < best_overall_val_mse:
                 best_overall_val_mse = val_loss
                 best_model_state = {k: v.cpu() for k, v in model.state_dict().items()}
+        else:
+            patience_cnt += 1
             
         if (epoch + 1) % 50 == 0:
             print(f"  Epoch {epoch+1:03d} | Train MSE: {train_loss:.4f} | Val MSE: {val_loss:.4f}")
+            
+        if patience_cnt >= patience:
+            print(f"  Early stopping at epoch {epoch+1}")
+            break
             
     print(f"  Best Val MSE: {best_val_mse:.4f} | MAE: {best_mae:.4f} | R2: {best_r2:.4f}")
     all_metrics.append({'mse': best_val_mse, 'mae': best_mae, 'r2': best_r2})
